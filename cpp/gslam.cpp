@@ -5,6 +5,9 @@
 #include <GSLAM/core/Estimator.h>
 #include <GSLAM/core/FileResource.h>
 #include <GSLAM/core/Optimizer.h>
+#include <GSLAM/core/Undistorter.h>
+#include <GSLAM/core/TileManager.h>
+#include <GSLAM/core/TileProjection.h>
 #include <string>
 
 /*
@@ -224,11 +227,15 @@ PYBIND11_MODULE(gslam,m) {
     py::class_<SO3>(m,"SO3")
             .def(py::init<>())
             .def(py::init<double,double,double,double>())
+            .def(py::init<const Point3d&,double>())
+            .def(py::init<const double*>())
             .def("log",&SO3::log)
             .def_static("exp",&SO3::exp<double>)
             .def("normalise",&SO3::normalise)
+            .def("getMatrix",&SO3::getMatrix)
             .def("__mul__",&SO3::mul)
             .def("trans",&SO3::trans)
+            .def("inverse",&SO3::inv)
             .def("__repr__",&SO3::toString)
             .def_readwrite("x", &SO3::x)
             .def_readwrite("y", &SO3::y)
@@ -240,6 +247,7 @@ PYBIND11_MODULE(gslam,m) {
             .def(py::init<>())
             .def(py::init<const SO3&,const Point3d&>())
             .def("log",&SE3::log)
+            .def("inverse",&SE3::inverse)
             .def_static("exp",&SE3::exp<double>)
             .def("__mul__",&SE3::mul)
             .def("trans",&SE3::trans)
@@ -515,6 +523,37 @@ PYBIND11_MODULE(gslam,m) {
             .def_static("Register",&FileResource::Register)
             .def_static("getResource",&FileResource::getResource)
             .def_static("saveResource2File",&FileResource::saveResource2File)
+            ;
+
+    py::class_<Undistorter>(m,"Undistorter")
+            .def(py::init<Camera, Camera>())
+            .def("undistort",&Undistorter::undistort)
+            .def("undistortFast",&Undistorter::undistortFast)
+            .def("cameraIn",&Undistorter::cameraIn)
+            .def("cameraOut",&Undistorter::cameraOut)
+            .def("prepareReMap",&Undistorter::prepareReMap)
+            .def("valid",&Undistorter::valid)
+            ;
+
+    py::class_<TileBase, GObject, TilePtr >(m,"Tile")
+            .def(py::init<>())
+            .def("type",&TileBase::type)
+            .def("getTileImage",&TileBase::getTileImage)
+            .def("getTileHeight",&TileBase::getTileHeight)
+            .def("getTilePosition",&TileBase::getTilePosition)
+            .def("getTimeStamp",&TileBase::getTimeStamp)
+            .def("memSizeInBytes",&TileBase::memSizeInBytes)
+            .def("toStream",&TileBase::toStream)
+            .def("fromStream",&TileBase::fromStream)
+            ;
+
+    py::class_<TileManager, GObject, TileManagerPtr >(m,"TileManager")
+            .def("type",&TileManager::type)
+            .def("getTile",&TileManager::getTile)
+            .def("setTile",&TileManager::setTile)
+            .def("maxZoomLevel",&TileManager::maxZoomLevel)
+            .def("minZoomLevel",&TileManager::minZoomLevel)
+            .def("save",&TileManager::save)
             ;
 }
 
