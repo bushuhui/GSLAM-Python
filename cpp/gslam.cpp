@@ -1,6 +1,10 @@
 #include <GSLAM/core/GSLAM.h>
 #include <GSLAM/core/Timer.h>
 #include <GSLAM/core/Dataset.h>
+#include <GSLAM/core/Vocabulary.h>
+#include <GSLAM/core/Estimator.h>
+#include <GSLAM/core/FileResource.h>
+#include <GSLAM/core/Optimizer.h>
 #include <string>
 
 /*
@@ -20,9 +24,32 @@ namespace py = pybind11;
 
 namespace GSLAM{
 
+struct aquire_py_GIL {
+    PyGILState_STATE state;
+	aquire_py_GIL() {        
+        LOG(INFO)<<"Start lock";
+		state = PyGILState_Ensure();
+	}
+
+	~aquire_py_GIL() {
+        LOG(INFO)<<"Release lock";
+		PyGILState_Release(state);
+	}
+};
+struct release_py_GIL {
+	PyThreadState *state;
+	release_py_GIL() {
+		state = PyEval_SaveThread();
+	}
+	~release_py_GIL() {
+		PyEval_RestoreThread(state);
+	}
+};
+
 class PyGObjectHandle: public GObjectHandle{
 public:
     virtual void handle(const GObjectPtr &obj)override{
+//        aquire_py_GIL state;
         PYBIND11_OVERLOAD(
                     void, /* Return type */
                     GObjectHandle,      /* Parent class */
@@ -128,6 +155,7 @@ public:
 };
 
 PYBIND11_MODULE(gslam,m) {
+    PyEval_InitThreads();
     m.doc()="This is the python APIs for GSLAM"+string(GSLAM_VERSION)+"(https://github.com/zdzhaoyong/GSLAM)";
 
     py::class_<Point2d>(m,"Point2d")
@@ -189,14 +217,15 @@ PYBIND11_MODULE(gslam,m) {
             .def("height",&Camera::height)
             .def("getParameters",&Camera::getParameters)
             .def("estimatePinHoleCamera",&Camera::estimatePinHoleCamera)
-            .def("Project",(Point2d (Camera::*)(const Point3d&)const) &Camera::Project,"Project a point from camera coordinate to image coordinate")
+            .def("Project",(Point2d (Camera::*)(const Point3d&)const) &Camera::Project,
+                 "Project a point from camera coordinate to image coordinate")
             .def("UnProject",(Point3d (Camera::*)(const Point2d&)const) &Camera::UnProject,"");
 
     py::class_<SO3>(m,"SO3")
             .def(py::init<>())
             .def(py::init<double,double,double,double>())
             .def("log",&SO3::log)
-            .def("exp",&SO3::exp<double>)
+            .def_static("exp",&SO3::exp<double>)
             .def("normalise",&SO3::normalise)
             .def("__mul__",&SO3::mul)
             .def("trans",&SO3::trans)
@@ -211,10 +240,11 @@ PYBIND11_MODULE(gslam,m) {
             .def(py::init<>())
             .def(py::init<const SO3&,const Point3d&>())
             .def("log",&SE3::log)
-            .def("exp",&SE3::exp<double>)
+            .def_static("exp",&SE3::exp<double>)
             .def("__mul__",&SE3::mul)
             .def("trans",&SE3::trans)
             .def("toString",&SE3::toString)
+            .def("__repr__",&SE3::toString)
             .def_property("translation", &SE3::getTranslation, &SE3::setTranslation)
             .def_property("rotation", &SE3::getRotation, &SE3::setRotation)
             ;
@@ -452,6 +482,39 @@ PYBIND11_MODULE(gslam,m) {
             .def("feed",&SLAM::feed)
             .def("finalize",&SLAM::finalize)
             .def_static("create",&SLAM::create)
+            ;
+
+    py::class_<Vocabulary,SPtr<Vocabulary> >(m,"Vocabulary")
+            .def(py::init<const std::string &>())
+            .def_static("create",&Vocabulary::create)
+            .def("save",&Vocabulary::save)
+            .def("load",(bool(Vocabulary::*)(const std::string &))&Vocabulary::load)
+            .def("size",&Vocabulary::size)
+            .def("empty",&Vocabulary::empty)
+            .def("clear",&Vocabulary::clear)
+            .def("transformImage",(void (Vocabulary::*)(const TinyMat&,
+                 BowVector &, FeatureVector &, int)const)&Vocabulary::transform)
+            .def("transformFeature",(void (Vocabulary::*)(const TinyMat &,
+                 WordId &, WordValue &, NodeId*, int) const)&Vocabulary::transform)
+            .def("getBranchingFactor",&Vocabulary::getBranchingFactor)
+            .def("getDepthLevels",&Vocabulary::getDepthLevels)
+            .def("getWord",&Vocabulary::getWord)
+            .def("getWordWeight",&Vocabulary::getWordWeight)
+            .def("getWeightingType",&Vocabulary::getWeightingType)
+            .def("getScoringType",&Vocabulary::getScoringType)
+            .def("setWeightingType",&Vocabulary::setWeightingType)
+            .def("getDescritorSize",&Vocabulary::getDescritorSize)
+            .def("getDescritorType",&Vocabulary::getDescritorType)
+            .def_static("meanValue",&Vocabulary::meanValue)
+            .def_static("distance",&Vocabulary::distance)
+            ;
+
+    py::class_<FileResource>(m,"FileResource")
+            .def_static("toHex",&FileResource::toHex)
+            .def_static("exportResourceFile",&FileResource::exportResourceFile)
+            .def_static("Register",&FileResource::Register)
+            .def_static("getResource",&FileResource::getResource)
+            .def_static("saveResource2File",&FileResource::saveResource2File)
             ;
 }
 

@@ -1,6 +1,6 @@
-import cppimport
-gslam = cppimport.imp("gslam") #This will pause for a moment to compile the module
-#import gslam
+#import cppimport
+#gslam = cppimport.imp("gslam") #This will pause for a moment to compile the module
+import gslam
 pt=gslam.Point2d(1,2)
 
 
@@ -39,7 +39,7 @@ slam=gslam.SLAM.create("/data/zhaoyong/Program/Apps/RTMapper3InOne/GSLAM-DIYSLAM
 
 print("SLAM "+slam.type()+" created")
 slam.setSvar(paras)
-#slam.setCallback(callback)
+slam.setCallback(callback)
 
 for i in range(10):
   slam.track(dataset.grabFrame())
