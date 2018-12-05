@@ -8,7 +8,10 @@
 #include <GSLAM/core/Undistorter.h>
 #include <GSLAM/core/TileManager.h>
 #include <GSLAM/core/TileProjection.h>
+#include <GSLAM/core/Application.h>
+#include <GSLAM/core/Messenger.h>
 #include <string>
+#include <complex>
 
 /*
 <%
@@ -25,34 +28,78 @@ using namespace pybind11::literals;
 
 namespace py = pybind11;
 
+
 namespace GSLAM{
 
-struct aquire_py_GIL {
-    PyGILState_STATE state;
-	aquire_py_GIL() {        
-        LOG(INFO)<<"Start lock";
-		state = PyGILState_Ensure();
-	}
+template <typename T>
+void addMessengerSupport(){
+    SvarWithType<std::function<void(const Publisher&,py::object)> >::instance()
+            .insert(typeid(T).name(),[](const Publisher& pub,py::object obj){
+        T* message = new T(obj.cast<T>());
+        std::shared_ptr<T> msg(message);
+        pub.publish(msg);
+    });
 
-	~aquire_py_GIL() {
-        LOG(INFO)<<"Release lock";
-		PyGILState_Release(state);
-	}
-};
-struct release_py_GIL {
-	PyThreadState *state;
-	release_py_GIL() {
-		state = PyEval_SaveThread();
-	}
-	~release_py_GIL() {
-		PyEval_RestoreThread(state);
-	}
-};
+    SvarWithType<std::function<void(py::object,const std::shared_ptr<void>&)> >::instance()
+            .insert(typeid(T).name(),[](py::object cbk,const std::shared_ptr<void>& obj){
+        std::shared_ptr<T> msg=*(const std::shared_ptr<T>*)&obj;
+        return cbk(*msg);
+    });
+}
+
+template <typename T>
+void addMessengerSupport(std::shared_ptr<T> M){
+    SvarWithType<std::function<void(const Publisher&,py::object)> >::instance()
+            .insert(typeid(T).name(),[](const Publisher& pub,py::object obj){
+        py::detail::type_caster<std::shared_ptr<T>> sharedObj;
+        if(!sharedObj.load(obj,true)){
+            return;
+        }
+
+        pub.publish((std::shared_ptr<T>)sharedObj);
+    });
+
+    SvarWithType<std::function<void(py::object,const std::shared_ptr<void>&)> >::instance()
+            .insert(typeid(T).name(),[](py::object cbk,const std::shared_ptr<void>& obj){
+        std::shared_ptr<T> msg=*(const std::shared_ptr<T>*)&obj;
+        return cbk(msg);
+    });
+}
+
+const std::type_info* getTypeInfo(PyTypeObject* obj){
+    if(!obj){
+        return nullptr;
+    }
+    static std::map<std::string,const std::type_info*> pythonTypes={
+        {std::string("int"),&typeid(int)},
+        {std::string("long"),&typeid(long)},
+        {std::string("float"),&typeid(double)},
+        {std::string("bool"),&typeid(bool)},
+        {std::string("str"),&typeid(std::string)},
+        {std::string("complex"),&typeid(std::complex<double>)}
+    };
+//    ,
+//            {std::string("list"),&typeid(std::vector<void>)},
+//            {std::string("tuple"),&typeid(std::vector<void>)},
+//            {std::string("set"),&typeid(std::set<void>)},
+//            {std::string("dict"),&typeid(std::map<void>)}
+    auto it=pythonTypes.find(obj->tp_name);
+    if(it!=pythonTypes.end()){
+        return it->second;
+    }
+
+    py::detail::type_info* info = py::detail::get_type_info(obj);
+    if(info) return info->cpptype;
+    LOG(ERROR)<<(std::string)py::str(py::handle((PyObject*)obj).get_type())
+             <<" is not a python class.";
+    return nullptr;
+}
 
 class PyGObjectHandle: public GObjectHandle{
 public:
     virtual void handle(const GObjectPtr &obj)override{
-//        aquire_py_GIL state;
+        /* Acquire GIL before calling Python code */
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(
                     void, /* Return type */
                     GObjectHandle,      /* Parent class */
@@ -64,17 +111,23 @@ public:
 
 class PyDataset: public Dataset{
 public:
+    PyDataset(){}
+    PyDataset(const std::string& dataset):Dataset(dataset){}
     virtual std::string type() const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(std::string,Dataset,type,);
     }
     virtual bool        isOpened(){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Dataset,isOpened,);
     }
     virtual FramePtr    grabFrame(){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(FramePtr,Dataset,grabFrame,);
     }
 
     virtual bool open(const std::string& dataset){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Dataset,open,dataset);
     }
 };
@@ -82,51 +135,65 @@ public:
 class PyMap: public Map{
 public:
     virtual std::string type()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(std::string,Map,type,);
     }
 
     /// MapFrame & MapPoint interface
     virtual bool insertMapPoint(const PointPtr& point){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,insertMapPoint,point);
     }
     virtual bool insertMapFrame(const FramePtr& frame){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,insertMapFrame,frame);
     }
     virtual bool eraseMapPoint(const PointID& pointId){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,eraseMapPoint,pointId);
     }
     virtual bool eraseMapFrame(const FrameID& frameId){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,eraseMapFrame,frameId);
     }
     virtual void clear(){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(void,Map,clear,);
     }
 
     virtual std::size_t frameNum()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(std::size_t,Map,frameNum,);
     }
     virtual std::size_t pointNum()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(std::size_t,Map,pointNum,);
     }
 
     virtual FramePtr getFrame(const FrameID& id)const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(FramePtr,Map,getFrame,id);
     }
     virtual PointPtr getPoint(const PointID& id)const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(PointPtr,Map,getPoint,id);
     }
 
     virtual FrameArray  getFrames()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(FrameArray,Map,getFrames,);
     }
     virtual PointArray  getPoints()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(PointArray,Map,getPoints,);
     }
     /// Save or load the map from/to the file
     virtual bool save(std::string path)const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,save,path);
     }
     virtual bool load(std::string path){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,Map,load,path);
     }
 };
@@ -134,32 +201,40 @@ public:
 class PySLAM: public SLAM{
 public:
     virtual std::string type()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(std::string,PySLAM,type,);
     }
     virtual bool valid()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,valid,);
     }
     virtual bool isDrawable()const{
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,isDrawable,);
     }
 
     virtual bool    setSvar(Svar& var){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,setSvar,var);
     }
     virtual bool    setCallback(GObjectHandle* cbk){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,setCallback,cbk);
     }
     virtual bool    track(FramePtr& frame){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,track,frame);
     }
     virtual bool    finalize(){
+        py::gil_scoped_acquire acquire;
         PYBIND11_OVERLOAD(bool,PySLAM,finalize,);
     }
 };
 
 PYBIND11_MODULE(gslam,m) {
     PyEval_InitThreads();
-    m.doc()="This is the python APIs for GSLAM"+string(GSLAM_VERSION)+"(https://github.com/zdzhaoyong/GSLAM)";
+    m.doc()="This is the python APIs for GSLAM"+string(GSLAM_VERSION_STR)
+            +"(https://github.com/zdzhaoyong/GSLAM)";
 
     py::class_<Point2d>(m,"Point2d")
             .def(py::init<>())
@@ -265,10 +340,11 @@ PYBIND11_MODULE(gslam,m) {
             ;
 
 
-    py::class_<GImage>(m,"GImage")
+    py::class_<GImage>(m,"GImage",py::buffer_protocol())
             .def(py::init<>())
             .def(py::init<int,int,int,uchar*,bool>())
             .def("empty",&GImage::empty)
+            .def_readonly("data",&GImage::data)
             .def("elemSize",&GImage::elemSize)
             .def("elemSize1",&GImage::elemSize1)
             .def("channels",&GImage::channels)
@@ -281,6 +357,17 @@ PYBIND11_MODULE(gslam,m) {
             .def("__repr__",[](const GImage& img){
                 return to_string(img.cols)+"x"
                         +to_string(img.rows)+"x"+to_string(img.channels());})
+            .def_buffer([](GImage &m) -> py::buffer_info {
+                return py::buffer_info(
+                    m.data,                                  /* Pointer to buffer */
+                    m.elemSize1(),                           /* Size of one scalar */
+                    std::string(1,"BbHhifdd"[m.type()&0x7]), /* Python struct-style format descriptor */
+                    3,                     /* Number of dimensions */
+                    { m.rows, m.cols, m.channels()},                  /* Buffer dimensions */
+                    { m.elemSize() * m.cols,
+                      m.elemSize(), m.elemSize1() }/* Strides (in bytes) for each index */
+                );
+             })
             ;
 
     py::class_<TicToc>(m,"TicToc")
@@ -312,10 +399,11 @@ PYBIND11_MODULE(gslam,m) {
     py::class_<Svar>(m,"Svar")
             .def(py::init<>())
             .def_static("instance",&Svar::instance, py::return_value_policy::reference)
+            .def_static("singleton",&Svar::instance, py::return_value_policy::reference)
             .def("insert",&Svar::insert,py::arg("name")="",
                  py::arg("var")="",py::arg("overwrite") = true)
-            .def("expandVal",&Svar::expandVal)
-            .def("setvar",&Svar::setvar)
+//            .def("expandVal",&Svar::expandVal)
+//            .def("setvar",&Svar::setvar)
             .def("getvar",&Svar::getvar)
             .def("parseLine",&Svar::ParseLine,"s"_a="","bSilentFailure"_a=false)
             .def("parseStream",&Svar::ParseStream)
@@ -448,6 +536,7 @@ PYBIND11_MODULE(gslam,m) {
 
     py::class_<Dataset,PyDataset,GObject,SPtr<Dataset> >(m,"Dataset")
             .def(py::init<>())
+            .def(py::init<const std::string&>())
             .def("name",&Dataset::name)
             .def("type",&Dataset::type)
             .def("isOpened",&Dataset::isOpened)
@@ -476,6 +565,10 @@ PYBIND11_MODULE(gslam,m) {
             .def("load",&Map::load)
             .def("getPid",&Map::getPid)
             .def("getFid",&Map::getFid)
+            ;
+
+    py::class_<HashMap,Map,SPtr<HashMap> >(m,"HashMap")
+            .def(py::init<>())
             ;
 
     py::class_<SLAM,PySLAM,GObject,SPtr<SLAM> >(m,"SLAM")
@@ -555,6 +648,93 @@ PYBIND11_MODULE(gslam,m) {
             .def("minZoomLevel",&TileManager::minZoomLevel)
             .def("save",&TileManager::save)
             ;
+
+    py::class_<Messenger>(m,"Messenger")
+            .def(py::init<>())
+            .def_static("singleton",&Messenger::instance)
+            .def("findSubscriber",&Messenger::findSubscriber)
+            .def("findPublisher",&Messenger::findPublisher)
+            .def("getPublishers",&Messenger::getPublishers)
+            .def("getSubscribers",&Messenger::getSubscribers)
+            .def("introduction",&Messenger::introduction)
+            .def("accept",(void (Messenger::*)(Messenger))&Messenger::join)
+            .def("advertise",[](Messenger messenger, py::object py_class,
+                 const std::string& topic, uint32_t queue_size = 0,
+                 bool latch = false){
+        auto info=getTypeInfo((PyTypeObject*)py_class.ptr());
+        if(!info) return Publisher();
+        Publisher pub(topic,info->name(),queue_size);
+        messenger.join(pub);
+        return pub;
+    })
+    .def("subscribe",[](Messenger messenger, py::object py_class,
+         const std::string& topic, uint32_t queue_size,
+         py::object callback){
+
+        auto info=getTypeInfo((PyTypeObject*)py_class.ptr());
+        if(!info) return Subscriber();
+        auto transFunc=SvarWithType<std::function<void(py::object,const std::shared_ptr<void>&)> >::instance()
+                .get_var(info->name(),nullptr);
+        Subscriber sub(topic,info->name(),[transFunc,callback](const std::shared_ptr<void>& msg){
+            py::gil_scoped_acquire acc;
+            transFunc(callback,msg);
+        },queue_size);
+        messenger.join(sub);
+        return sub;
+    });
+
+    py::class_<Publisher>(m,"Publisher")
+            .def("shutdown",&Publisher::shutdown)
+            .def("getTopic",&Publisher::getTopic)
+            .def("getTypeName",&Publisher::getTypeName)
+            .def("getNumSubscribers",&Publisher::getNumSubscribers)
+            .def("isLatched",&Publisher::isLatched)
+            .def("publish",[](const Publisher& pub,py::object msg){
+        if(!pub) return;
+        auto pubFunc=SvarWithType<std::function<void(const Publisher&,py::object)> >::instance()
+                .get_var(pub.getTypeName(),nullptr);
+        if(!pubFunc){
+            LOG(ERROR)<<"Message type "<<Messenger::translate(pub.getTypeName())<<" are not registed.\n";
+            return;
+        }
+        pubFunc(pub,msg);
+    });
+
+    py::class_<Subscriber>(m,"Subscriber")
+            .def("shutdown",&Subscriber::shutdown)
+            .def("getTopic",&Subscriber::getTopic)
+            .def("getTypeName",&Subscriber::getTypeName)
+            .def("getNumPublishers",&Subscriber::getNumPublishers);
+
+
+    py::class_<Application,ApplicationPtr>(m,"Application")
+            .def("isRunning",&Application::isRunning)
+            .def("name",&Application::name)
+            .def("gslam_version",&Application::gslam_version)
+            .def("init",&Application::init)
+            .def_static("create",&Application::create)
+            ;
+
+    py::class_<DatasetPlayer>(m,"DatasetPlayer")
+            .def(py::init<Dataset,Messenger,Svar>(),
+                 py::arg("dataset")=Dataset(),
+                 py::arg("messenger") = Messenger::instance(),
+                 py::arg("config")=Svar::instance())
+            .def("open",&DatasetPlayer::open)
+            .def("play",&DatasetPlayer::play)
+            .def("start",&DatasetPlayer::start);
+
+    addMessengerSupport<int>();
+    addMessengerSupport<bool>();
+    addMessengerSupport<long>();
+    addMessengerSupport<double>();
+    addMessengerSupport<std::string>();
+    addMessengerSupport<Point3d>();
+    addMessengerSupport<GImage>();
+    addMessengerSupport<Publisher>();
+
+    addMessengerSupport(FramePtr());
+    addMessengerSupport(MapPtr());
 }
 
 

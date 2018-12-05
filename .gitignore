@@ -3,4 +3,5 @@
 *.gmap
 build*
 *.pro.user
-
+*.user
+*.qglviewer.xml
