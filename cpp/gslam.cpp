@@ -368,7 +368,25 @@ PYBIND11_MODULE(gslam,m) {
                       m.elemSize(), m.elemSize1() }/* Strides (in bytes) for each index */
                 );
              })
-            ;
+            .def(py::init([](py::buffer b) {
+                /* Request a buffer descriptor from Python */
+                py::buffer_info info = b.request();
+                auto idx=std::string("BbHhifd").find(info.format);
+                if(idx==std::string::npos)
+                     throw std::runtime_error("Incompatible format: expected GImage formats!");
+
+                if (info.ndim > 3)
+                    throw std::runtime_error("Incompatible GImage dimension!");
+
+                     if(info.ndim == 1)
+                          return GImage(info.shape[0],1,((idx&0x7)+((1-1)<<3)),(uchar*)info.ptr,true);
+                     if(info.ndim == 2)
+                          return GImage(info.shape[0],info.shape[1],((idx&0x7)+((1-1)<<3)),(uchar*)info.ptr,true);
+                     if(info.ndim == 3)
+                          return GImage(info.shape[0],info.shape[1],((idx&0x7)+((info.shape[2]-1)<<3)),(uchar*)info.ptr,true);
+
+                     return GImage();
+            }));
 
     py::class_<TicToc>(m,"TicToc")
             .def(py::init<>())
