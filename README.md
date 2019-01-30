@@ -30,6 +30,37 @@ With the `setup.py` file included in this project, the `pip install` command wil
 invoke CMake and build the pybind11 module as specified in `CMakeLists.txt`.
 
 
+
+**Note for building `dev` branch:**
+
+If you want to build the `dev` branch, please follows the following instructs:
+
+```
+git checkout dev
+git submodule update
+cd ..
+pip install ./GSLAM-Python
+```
+
+
+
+**Build GSLAM:**
+
+If you want to use the GSLAM-Python, you need to build GSLAM and install into your system by follows the instructions:
+
+```
+mkdir build-GSLAM
+cd build-GSLAM
+cmake ../GSLAM
+make
+sudo make install
+```
+
+
+
+
+
+
 ## Special notes for Windows
 
 **Compiler requirements**
